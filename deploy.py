@@ -30,9 +30,7 @@ def deploy():
         ],
         work_pool_name="deployment-pool",
         # Define a different default parameter for this deployment
-        parameters={
-            "name": "Chijioke Data Engineer",
-        },
+       
     )
 
 
