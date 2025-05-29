@@ -28,7 +28,7 @@ def deploy():
             # Run the flow every hour on the hour
             CronSchedule(cron="*/5 * * * *"),
         ],
-        work_pool_name="deployment-pool",
+        work_pool_name="production-pool",
         # Define a different default parameter for this deployment
        
     )
