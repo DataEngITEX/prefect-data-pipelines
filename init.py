@@ -3,12 +3,18 @@ from prefect import flow, task
 import subprocess
 import os
 
+
+
+@task
+def install_requirements():
+    subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)
+
 @task
 def run_spark_job():
     try:
         result = subprocess.run(
-            #[r"C:\Spark\spark-3.5.5-bin-hadoop3\bin\spark-submit.cmd", "spark.py"],
-            ["spark-submit", "spark.py"],
+            [r"C:\Spark\spark-3.5.5-bin-hadoop3\bin\spark-submit.cmd", "spark.py"],
+            #["spark-submit", "spark.py"],
             shell=True,
             capture_output=True,
             text=True,
@@ -20,6 +26,7 @@ def run_spark_job():
         raise
 @flow
 def spark_flow():
+   # install_requirements()
     run_spark_job()
 
 if __name__ == "__main__":
