@@ -10,7 +10,7 @@ def install_requirements():
     subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)'''
 @task
 def set_environment():
-    os.environ["PYSPARK_PYTHON"] ="C:\Users\data.engineer\Documents\Prefect\prefect-venv\Scripts\python"
+    os.environ["PYSPARK_PYTHON"] =r"C:\Users\data.engineer\Documents\Prefect\prefect-venv\Scripts\python"
 
 @task
 def run_spark_job():
