@@ -80,21 +80,25 @@ def process_cbn_report():
         "driver": "org.postgresql.Driver"
     }
 
+    try:
     # Step 2: Create Spark session
-    spark = SparkSession.builder \
-        .appName("CBN Report Processing") \
-        .master("local[*]") \
-        .config("spark.executor.memory", "1g") \
-        .config("spark.driver.memory", "1g") \
-        .config("spark.sql.shuffle.partitions", "1") \
-        .config("spark.default.parallelism", "1") \
-        .config("spark.hadoop.hadoop.security.authorization", "false") \
-        .config("spark.hadoop.hadoop.security.authentication", "simple") \
-        .config("spark.jars",r"C:\Spark\spark-3.5.5-bin-hadoop3\jars\spark-excel_2.12-3.5.1_0.20.4.jar") \
-        .getOrCreate()
+        spark = SparkSession.builder \
+            .appName("CBN Report Processing") \
+            .master("local[*]") \
+            .config("spark.executor.memory", "1g") \
+            .config("spark.driver.memory", "1g") \
+            .config("spark.sql.shuffle.partitions", "1") \
+            .config("spark.default.parallelism", "1") \
+            .config("spark.hadoop.hadoop.security.authorization", "false") \
+            .config("spark.hadoop.hadoop.security.authentication", "simple") \
+            .config("spark.jars",r"C:\Spark\spark-3.5.5-bin-hadoop3\jars\spark-excel_2.12-3.5.1_0.20.4.jar") \
+            .getOrCreate()
 
-    spark.sparkContext.setLogLevel("ERROR")
-    # Step 3: Refresh the materialized view
+        spark.sparkContext.setLogLevel("ERROR")
+    except Exception as e:
+        print("Failed to start Spark session:", e)
+        
+        # Step 3: Refresh the materialized view
     print("Updating CBN report")
     def refresh_materialized_view():
         conn = psycopg2.connect(
