@@ -1,0 +1,4 @@
+__pycache__/
+prefect-venv/
+.env
+*.log
