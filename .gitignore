@@ -2,3 +2,8 @@ __pycache__/
 prefect-venv/
 .env
 *.log
+prefect_production_pool_log.txt
+prefect_production_pool.txt
+prefect_server_log.txt
+test.py
+adhoc.py

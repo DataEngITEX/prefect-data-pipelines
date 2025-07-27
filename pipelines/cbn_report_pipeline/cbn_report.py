@@ -126,7 +126,6 @@ def process_cbn_report():
         properties=pg_properties
     )
    
-    
     desired_columns = ["wallet", "updated_at", "category", "terminal", "address", "phone_number", "bvn", "volume", "value"]
     cbn_df = cbn_df.toDF(*desired_columns)
 
