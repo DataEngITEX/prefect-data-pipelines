@@ -87,7 +87,7 @@ def extract_mdw_purchases():
     latest_time = get_latest_transaction_time(generate_mdw_quarterly_table_name_from_date(datetime.today()))
     journal_name = generate_journal_name(datetime.today())
 
-    start_iso = latest_time.isoformat(timespec='milliseconds') + 'Z'
+    start_iso = latest_time if isinstance(latest_time,str) else  latest_time.isoformat(timespec='milliseconds') + 'Z'
     stop_iso = datetime.now().isoformat(timespec='milliseconds') + 'Z'
     print(f"ISO range: {start_iso} to {stop_iso}")
 
@@ -110,7 +110,8 @@ def extract_mdw_purchases():
     mongo_options = {
         "spark.mongodb.read.connection.uri": f"mongodb://{mdw_username}:{urllib.parse.quote_plus(mdw_password)}@{mdw_host}:{mdw_port}/{mdw_database}?authSource=admin",
         "spark.mongodb.read.database": mdw_database,
-        "spark.mongodb.read.collection": journal_name
+        "spark.mongodb.read.collection": journal_name,
+        "inferSchema": "false"
         
     }
 
@@ -118,7 +119,7 @@ def extract_mdw_purchases():
     last_id = None
     batch_size = 50000
     total_records, batch_num = 0, 0
-    print(f"Starting batch process extraction from: {journal_name}")
+    print(f"Starting batch process extraction from: {journal_name} into {generate_mdw_quarterly_table_name_from_date(datetime.today())} table")
     
     while True:
         match_stage = {
@@ -207,7 +208,7 @@ def extract_mdw_vas():
     latest_time = get_latest_transaction_time(warehouse_table_name)
     journal_name = generate_journal_name(datetime.today())
 
-    start_iso = latest_time.isoformat(timespec='milliseconds') + 'Z'
+    start_iso = latest_time if isinstance(latest_time,str) else latest_time.isoformat(timespec='milliseconds') + 'Z'
     stop_iso = datetime.now().isoformat(timespec='milliseconds') + 'Z'
     print(f"ISO range: {start_iso} to {stop_iso}")
 
@@ -229,7 +230,8 @@ def extract_mdw_vas():
     mongo_options = {
         "spark.mongodb.read.connection.uri": f"mongodb://{mdw_username}:{urllib.parse.quote_plus(mdw_password)}@{mdw_host}:{mdw_port}/{mdw_database}?authSource=admin",
         "spark.mongodb.read.database": mdw_database,
-        "spark.mongodb.read.collection": journal_name
+        "spark.mongodb.read.collection": journal_name,
+        "inferSchema": "false"
     }
 
     project_stage = {"$project": {f: 1 for f in projection_fields}}
@@ -242,7 +244,7 @@ def extract_mdw_vas():
     batch_size = 25000
     total_records, batch_num = 0, 0
     
-    print(f"Starting batch process extraction from: {journal_name}")
+    print(f"Starting batch process extraction from: {journal_name} into mdw_vas table")
     
     while True:
        
@@ -354,7 +356,7 @@ def get_latest_transaction_time(table_name, schema='vas_schema', timestamp_col='
             return fallback.replace(hour=23, minute=59, second=59, microsecond=999000)
         
         if isinstance(result, str):
-            return parser.parse(result)
+            return result
         return result
 
     except Exception as e:
