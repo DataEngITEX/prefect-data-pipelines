@@ -381,4 +381,8 @@ def mdw_data_pipeline():
  
 
 if __name__ == '__main__':
-    mdw_data_pipeline()
+    try:
+        mdw_data_pipeline()
+    except Exception as e:
+        print(f"An error occurred in the MDW data pipeline: {e}")
+        
