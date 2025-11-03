@@ -14,7 +14,7 @@ def run_spark_job():
     try:
         result = subprocess.run(
            # [r"C:\Spark\spark-3.5.5-bin-hadoop3\bin\spark-submit.cmd", "spark.py"],
-            ["spark-submit", "pipelines/nibss_pipeline/nibss_pipeline.py"],
+            ["spark-submit", "pipelines/rca_pipeline/rca_pipeline.py"],
             shell=True,
             capture_output=True,
             text=True,

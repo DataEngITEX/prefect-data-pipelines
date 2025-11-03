@@ -21,12 +21,12 @@ def deploy():
                 "access_token":Secret.load("github-prefect-data-pipelines-repo-secret",validate=False),
             },
         ),
-        entrypoint="pipelines/cbn_report_pipeline/cbn_report_entry.py:spark_flow",
+        entrypoint="pipelines/rca_pipeline/rca_pipeline_entry.py:spark_flow",
     ).deploy(
-        name="CBN-REPORT-PIPELINE",
+        name="RCA-PIPELINE",
         schedules=[
-            # Run the flow every hour on the hour
-            CronSchedule(cron="0 10-14 * * 1,2"),
+            # Run the flow every Monday at 12 PM
+            CronSchedule(cron="0 12 * * 1")
         ],
         work_pool_name="production-pool",
         # Define a different default parameter for this deployment

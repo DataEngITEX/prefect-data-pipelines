@@ -1,6 +1,6 @@
 # Import necessary libraries
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, udf
+from pyspark.sql.functions import col, lit, udf, regexp_replace
 from pyspark.sql.types import StringType, TimestampType, StructType, StructField
 import urllib.parse
 from pymongo import MongoClient
@@ -41,10 +41,10 @@ spark = SparkSession.builder \
             r"C:\Spark\spark-3.5.5-bin-hadoop3\jars\mongodb-driver-sync-5.5.1.jar,"
             r"C:\Spark\spark-3.5.5-bin-hadoop3\jars\mongodb-driver-core-5.5.1.jar"
             ) \
-    .config("spark.executor.memory", "5g") \
-    .config("spark.driver.memory", "5g") \
+    .config("spark.executor.memory", "8g") \
+    .config("spark.driver.memory", "8g") \
     .getOrCreate()
-#spark.sparkContext.setLogLevel("DEBUG")
+spark.sparkContext.setLogLevel("ERROR")
 
 # Helper functions
 def generate_journal_name(date: datetime) -> str:
@@ -82,14 +82,44 @@ def get_postgres_connection():
         port=postgres_port
     )
 
+def clean_dataframe(df):
+    """Remove null bytes from all string columns to prevent PostgreSQL UTF8 encoding errors"""
+    print("Cleaning null bytes from dataframe columns...")
+    for column in df.columns:
+        if dict(df.dtypes)[column] == 'string':
+            df = df.withColumn(column, regexp_replace(col(column), "\\x00", ""))
+    return df
+def get_last_id(table_name, schema='vas_schema', id_col='_id'):
+    """Get the last _id from PostgreSQL to resume from"""
+    try:
+        conn = get_postgres_connection()
+        cursor = conn.cursor()
+        query = f"SELECT MAX({id_col}) FROM {schema}.{table_name}"
+        cursor.execute(query)
+        result = cursor.fetchone()[0]
+        conn.close()
+
+        if result is None:
+            print(f"No existing records found in {schema}.{table_name}, starting from beginning")
+            return None
+        
+        print(f"Last ID from PostgreSQL: {result}")
+        return result
+
+    except Exception as e:
+        print(f"Failed to fetch last ID for {table_name}: {e}")
+        return None
 
 def extract_mdw_purchases():
-    latest_time = get_latest_transaction_time(generate_mdw_quarterly_table_name_from_date(datetime.today()))
-    journal_name = generate_journal_name(datetime.today())
+    date=datetime.today()#-timedelta(days=89)#for a custom run for last quarter
+    table_name = generate_mdw_quarterly_table_name_from_date(date)
+    journal_name = generate_journal_name(date)
 
-    start_iso = latest_time if isinstance(latest_time,str) else  latest_time.isoformat(timespec='milliseconds') + 'Z'
-    stop_iso = datetime.now().isoformat(timespec='milliseconds') + 'Z'
-    print(f"ISO range: {start_iso} to {stop_iso}")
+    # Get the last _id from PostgreSQL to resume from
+    last_id = get_last_id(table_name)
+    
+    print(f"Starting batch process extraction from: {journal_name} into {table_name}")
+    print(f"Resuming from last ID: {last_id if last_id else 'Beginning'}")
 
     projection_fields = [
       "_id", "customData", "posEntryMode","posDataCode", "profiledIntlTid", "prrn", "deliveryStatus",
@@ -104,7 +134,6 @@ def extract_mdw_purchases():
     ]
     lowercase_columns = [c.lower() for c in projection_fields]
 
-
     explicit_schema = StructType([StructField(f, StringType(), True) for f in projection_fields])
 
     mongo_options = {
@@ -112,92 +141,83 @@ def extract_mdw_purchases():
         "spark.mongodb.read.database": mdw_database,
         "spark.mongodb.read.collection": journal_name,
         "inferSchema": "false"
-        
     }
 
     project_stage = {"$project": {f: 1 for f in projection_fields}}
-    last_id = None
-    batch_size = 50000
+    #batch_size = 500000
     total_records, batch_num = 0, 0
-    print(f"Starting batch process extraction from: {journal_name} into {generate_mdw_quarterly_table_name_from_date(datetime.today())} table")
     
-    while True:
-        match_stage = {
-            "transactionTime": {"$gt": {"$date": start_iso}, "$lte": {"$date": stop_iso}},
-            "transactionType": "Purchase"
-        }
-        if last_id:
-            match_stage["_id"] = {"$gt": {"$oid": str(last_id)}}
+    try:
+        while True:
+            # Simple match stage - only filter by _id for pagination and transaction type
+            match_stage = {
+                "transactionType": "Purchase"
+            }
+            if last_id:
+                match_stage["_id"] = {"$gt": {"$oid": str(last_id)}}
 
-        pipeline = [
-            {"$match": match_stage},
-            {"$limit": batch_size},
-            project_stage
-        ]
-        mongo_options["spark.mongodb.read.aggregation.pipeline"] = json.dumps(pipeline)
+            pipeline = [
+                {"$match": match_stage},
+                {"$sort": {"_id": 1}},  # Sort by _id for consistent pagination
+                #{"$limit": batch_size},
+                project_stage
+            ]
+            mongo_options["spark.mongodb.read.aggregation.pipeline"] = json.dumps(pipeline)
 
-        df = spark.read.format("mongodb") \
-            .schema(explicit_schema) \
-            .options(**mongo_options) \
-            .load()
-        df = df.toDF(*lowercase_columns)
-        if df.rdd.isEmpty():
-            print("Batch load complete. No more records to read from middleware.")
-            break
+            df = spark.read.format("mongodb") \
+                .schema(explicit_schema) \
+                .options(**mongo_options) \
+                .load()
+                
+            df = df.toDF(*lowercase_columns)
+            
+            if df.rdd.isEmpty():
+                print("Batch load complete. No more records to read from middleware.")
+                break
+                
+            print(f"Fetched {df.count()} records from MongoDB.")
+            df = df.withColumn("amount", col("amount") / 100)
+            
+            # Clean null bytes before loading to PostgreSQL
+            df = clean_dataframe(df)
+
+            # Get the last _id for next batch pagination
+            last_row = df.orderBy(col("_id").desc()).limit(1).collect()[0]
+            last_id = last_row["_id"]
+
+            cnt = df.count()
+            batch_num += 1
+            total_records += cnt
+            print(f"Batch {batch_num}: {cnt} records (Total: {total_records}), last ID: {last_id}")
+
+            load_to_postgres_database(df, table_name)
+            
+    except Exception as e:
+        print(f"An error occurred during extraction/loading: {e}")
         
-        df = df.withColumn("amount", col("amount") / 100)
         
-
-        last_row = df.orderBy(col("_id").desc()).limit(1).collect()[0]
-        last_id = last_row["_id"]
-
-        cnt = df.count()
-        batch_num += 1
-        total_records += cnt
-        print(f"Batch {batch_num}: {cnt} records (Total: {total_records}), last ID: {last_id}")
-
-        load_to_postgres_database(df, generate_mdw_quarterly_table_name_from_date(datetime.today()))
-
+        
 def load_to_postgres_database(df, table_name):
     """
     Loads a Spark DataFrame into a PostgreSQL table."""
     
     
     print("Loading data into Data Warehouse (Postgres)...")
-    
-    # 1. Get the DataFrame schema
-    schema = df.schema
-    
-    # 2. Build the column type string for the JDBC writer
-    # This is crucial for Spark to correctly create the table if it doesn't exist.
-    column_types = []
-    for field in schema.fields:
-        # Map Spark data types to PostgreSQL data types.
-        # This is a simplified example; you might need a more comprehensive mapping.
-        if isinstance(field.dataType, StringType):
-            db_type = "TEXT" # Changed from VARCHAR(255) to TEXT for unlimited length
-        else:
-            db_type = "TEXT" # Defaulting to a generic type for other types
-            
-        column_types.append(f'"{field.name}" {db_type}')
-    
-    create_table_column_types_string = ", ".join(column_types)
-
-    writer = df.write.format("jdbc") \
-        .option("url", f"jdbc:postgresql://{postgres_host}:{postgres_port}/{postgres_database}") \
-        .option("dbtable", f"vas_schema.{table_name}") \
-        .option("user", postgres_user) \
-        .option("password", postgres_password) \
-        .option("driver", "org.postgresql.Driver") \
-        .option("createTableColumnTypes", create_table_column_types_string) \
-        .mode("append") # Use append mode, which creates the table if it doesn't exist
-
     try:
-        writer.save()
+        writer = df.write.format("jdbc") \
+            .option("url", f"jdbc:postgresql://{postgres_host}:{postgres_port}/{postgres_database}") \
+            .option("dbtable", f"vas_schema.{table_name}") \
+            .option("user", postgres_user) \
+            .option("password", postgres_password) \
+            .option("driver", "org.postgresql.Driver") \
+            .mode("append") \
+            .save()
+    
+    
         print(f"Data successfully loaded into vas_schema.{table_name}.")
     except Exception as e:
         print(f"Error loading data: {e}")
-        # Add more specific error handling here if needed.
+       
 def extract_mdw_vas():
     """function to extract VAS data from MongoDB using Spark, similar to the mdw_purchases function."""
     
@@ -237,7 +257,7 @@ def extract_mdw_vas():
     project_stage = {"$project": {f: 1 for f in projection_fields}}
     
     match_stage = {
-            "transactionTime": {"$gt": {"$date": start_iso}, "$lte": {"$date": stop_iso}},
+            "transactionTime": {"$gte": {"$date": start_iso}, "$lte": {"$date": stop_iso}},
             "transactionType": "VAS"
         }
     last_id = None
@@ -253,7 +273,7 @@ def extract_mdw_vas():
 
         pipeline = [
             {"$match": match_stage},
-            {"$limit": batch_size},
+            {"$sort": {"_id": 1}},
             project_stage
         ]
         mongo_options["spark.mongodb.read.aggregation.pipeline"] = json.dumps(pipeline)
@@ -271,6 +291,9 @@ def extract_mdw_vas():
         
         # Consistent data transformations
         df = df.withColumn("amount", col("amount") / 100)
+        
+        # Clean null bytes before loading to PostgreSQL
+        df = clean_dataframe(df)
         
         last_row = df.orderBy(col("_id").desc()).limit(1).collect()[0]
         last_id = last_row["_id"]
@@ -321,6 +344,8 @@ def extract_and_load_mdw_merchants():
         else:
             print("Warning: 'merchant_id' not found. Skipping deduplication.")
 
+        # Clean null bytes before loading to PostgreSQL
+        merchants_df = clean_dataframe(merchants_df)
 
         # Load to PostgreSQL
         print("Loading merchants into PostgreSQL warehouse...")
@@ -339,7 +364,7 @@ def extract_and_load_mdw_merchants():
     except Exception as e:
         print("An error occurred during merchant ETL:", str(e))
 
-def get_latest_transaction_time(table_name, schema='vas_schema', timestamp_col='transactiontime'):
+def get_latest_transaction_time(table_name, schema='vas_schema', timestamp_col='transactiontime',date=None):
     """Get latest transaction time from PostgreSQL"""
     try:
         conn = get_postgres_connection()
@@ -350,20 +375,23 @@ def get_latest_transaction_time(table_name, schema='vas_schema', timestamp_col='
         conn.close()
 
         if result is None:
-            today = datetime.today()
+            today = date
             first_day_of_month = datetime(today.year, today.month, 1)
             fallback = first_day_of_month - timedelta(days=1)
+            print("LATEST TIME FROM POSTGRES falback:", fallback)
             return fallback.replace(hour=23, minute=59, second=59, microsecond=999000)
         
         if isinstance(result, str):
+            print("LATEST TIME FROM POSTGRES:",result)
             return result
         return result
 
     except Exception as e:
         print(f"Failed to fetch latest timestamp for {table_name}: {e}")
-        today = datetime.today()
+        today = date
         first_day_of_month = datetime(today.year, today.month, 1)
         fallback = first_day_of_month - timedelta(days=1)
+        print("LATEST TIME FROM POSTGRES: fallback", fallback)
         return fallback.replace(hour=23, minute=59, second=59, microsecond=999000)
 
 # Main Prefect flow
@@ -385,4 +413,3 @@ if __name__ == '__main__':
         mdw_data_pipeline()
     except Exception as e:
         print(f"An error occurred in the MDW data pipeline: {e}")
-        

@@ -7,3 +7,6 @@ prefect_production_pool.txt
 prefect_server_log.txt
 test.py
 adhoc.py
+pending/
+geolocation_adhoc_tasks.py
+prefect_block_modify.py
