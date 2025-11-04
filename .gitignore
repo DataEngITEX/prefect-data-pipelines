@@ -8,5 +8,5 @@ prefect_server_log.txt
 test.py
 adhoc.py
 pending/
-geolocation_adhoc_tasks.py
+geolocation_adhoc_task.py
 prefect_block_modify.py

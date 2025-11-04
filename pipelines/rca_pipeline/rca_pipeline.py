@@ -10,16 +10,16 @@ import json
 from datetime import datetime, timedelta
 from rca_utils import generate_journal_name, to_snake_case, load_to_postgres_database
 import urllib
-from prefect.blocks.secrets import Secret
+from prefect.blocks.system import Secret
 # Configuration
-postgres_secret=Secret.load("rca-postgres-secret").get()["postgres"]
+postgres_secret=Secret.load("rca-pipeline-secret").get()["postgres"]
 postgres_database = postgres_secret["database"]
 postgres_user = postgres_secret["user"]
 postgres_host = postgres_secret["host"]
 postgres_port = postgres_secret["port"]
 postgres_password = postgres_secret["password"]
 
-mongodb_secret=Secret.load("rca-postgres-secret").get()["mongodb"]
+mongodb_secret=Secret.load("rca-pipeline-secret").get()["mongodb"]
 mdw_username = mongodb_secret["user"]
 mdw_password = mongodb_secret["password"]
 mdw_host = mongodb_secret["host"]
